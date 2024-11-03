@@ -17,7 +17,8 @@ import org.w3c.dom.*;
 public class CBZToEPUBConverter extends JFrame {
 
     private JTextField filePathField;
-    private JTextField resolutionField;
+    private JTextField yResolutionField; // Height field first
+    private JTextField xResolutionField; // Width field second
     private JButton selectFileButton;
     private JButton convertButton;
     private File cbzFile;
@@ -28,7 +29,7 @@ public class CBZToEPUBConverter extends JFrame {
         setLayout(new BorderLayout());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-        JPanel panel = new JPanel(new GridLayout(3, 1));
+        JPanel panel = new JPanel(new GridLayout(4, 1));
 
         // File selection section
         JPanel filePanel = new JPanel();
@@ -42,9 +43,13 @@ public class CBZToEPUBConverter extends JFrame {
 
         // Resolution input section
         JPanel resolutionPanel = new JPanel();
-        resolutionPanel.add(new JLabel("Resolution (e.g., 800 for 800x800): "));
-        resolutionField = new JTextField("800", 5);
-        resolutionPanel.add(resolutionField);
+        resolutionPanel.add(new JLabel("Resolution (Height x Width): "));
+        yResolutionField = new JTextField("800", 5); // Height field
+        xResolutionField = new JTextField("800", 5); // Width field
+        resolutionPanel.add(new JLabel("Height: "));
+        resolutionPanel.add(yResolutionField);
+        resolutionPanel.add(new JLabel("Width: "));
+        resolutionPanel.add(xResolutionField);
         panel.add(resolutionPanel);
 
         // Conversion button
@@ -78,27 +83,34 @@ public class CBZToEPUBConverter extends JFrame {
             }
 
             try {
-                int resolution = Integer.parseInt(resolutionField.getText().trim());
+                int yResolution = Integer.parseInt(yResolutionField.getText().trim());
+                int xResolution = Integer.parseInt(xResolutionField.getText().trim());
+
+                // Check that height is larger than width
+                if (yResolution <= xResolution) {
+                    JOptionPane.showMessageDialog(null, "Height must be greater than Width.", "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+
                 String epubPath = cbzFile.getAbsolutePath().replace(".cbz", ".epub");
-                convertCBZToEPUB(cbzFile.getAbsolutePath(), epubPath, resolution);
+                convertCBZToEPUB(cbzFile.getAbsolutePath(), epubPath, xResolution, yResolution);
                 JOptionPane.showMessageDialog(null, "Conversion complete!\nSaved as: " + epubPath);
             } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(null, "Please enter a valid resolution.", "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(null, "Please enter valid resolutions.", "Error", JOptionPane.ERROR_MESSAGE);
             } catch (Exception ex) {
                 ex.printStackTrace();
                 JOptionPane.showMessageDialog(null, "An error occurred: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
-
-    public static void convertCBZToEPUB(String cbzPath, String epubPath, int resolution) throws Exception {
+public static void convertCBZToEPUB(String cbzPath, String epubPath, int xResolution, int yResolution) throws Exception {
         File tempDir = Files.createTempDirectory("cbz_images").toFile();
         unzip(cbzPath, tempDir);
 
         try (ZipOutputStream epubZip = new ZipOutputStream(new FileOutputStream(epubPath))) {
             addMimetype(epubZip);
             addContainer(epubZip);
-            addImagesAndPages(tempDir, epubZip, resolution);
+            addImagesAndPages(tempDir, epubZip, xResolution, yResolution);
             addContentOpf(epubZip, tempDir);
         }
 
@@ -137,23 +149,23 @@ public class CBZToEPUBConverter extends JFrame {
     private static void addContainer(ZipOutputStream epubZip) throws IOException {
         epubZip.putNextEntry(new ZipEntry("META-INF/container.xml"));
         String containerContent = "<?xml version=\"1.0\"?>\n" +
-                                  "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n" +
-                                  "    <rootfiles>\n" +
-                                  "        <rootfile full-path=\"OPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n" +
-                                  "    </rootfiles>\n" +
-                                  "</container>";
+                "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n" +
+                "    <rootfiles>\n" +
+                "        <rootfile full-path=\"OPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n" +
+                "    </rootfiles>\n" +
+                "</container>";
         epubZip.write(containerContent.getBytes());
         epubZip.closeEntry();
     }
 
-    private static void addImagesAndPages(File imageDir, ZipOutputStream epubZip, int resolution) throws IOException {
+    private static void addImagesAndPages(File imageDir, ZipOutputStream epubZip, int xResolution, int yResolution) throws IOException {
         File[] images = imageDir.listFiles();
         if (images == null) return;
 
         for (File image : images) {
             if (image.isFile()) {
                 BufferedImage originalImage = ImageIO.read(image);
-                BufferedImage resizedImage = resizeImage(originalImage, resolution, resolution);
+                BufferedImage resizedImage = resizeImage(originalImage, xResolution, yResolution);
 
                 String imagePath = "OPS/images/" + image.getName();
                 epubZip.putNextEntry(new ZipEntry(imagePath));
@@ -161,11 +173,11 @@ public class CBZToEPUBConverter extends JFrame {
                 epubZip.closeEntry();
 
                 String xhtmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n" +
-                                      "<!DOCTYPE html>\n" +
-                                      "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n" +
-                                      "<head><title>Image Page</title></head>\n" +
-                                      "<body><img src=\"../images/" + image.getName() + "\" alt=\"\"/></body>\n" +
-                                      "</html>";
+                        "<!DOCTYPE html>\n" +
+                        "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n" +
+                        "<head><title>Image Page</title></head>\n" +
+                        "<body><img src=\"../images/" + image.getName() + "\" alt=\"\"/></body>\n" +
+                        "</html>";
 
                 String xhtmlPath = "OPS/pages/" + image.getName().replaceFirst("[.][^.]+$", "") + ".xhtml";
                 epubZip.putNextEntry(new ZipEntry(xhtmlPath));
@@ -184,79 +196,74 @@ public class CBZToEPUBConverter extends JFrame {
     }
 
     private static void addContentOpf(ZipOutputStream epubZip, File tempDir) throws Exception {
-    DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-    DocumentBuilder builder = factory.newDocumentBuilder();
-    Document doc = builder.newDocument();
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document doc = builder.newDocument();
 
-    // Create root element <package>
-    Element packageElement = doc.createElement("package");
-    packageElement.setAttribute("version", "3.0");
-    packageElement.setAttribute("xmlns", "http://www.idpf.org/2007/opf");
-    doc.appendChild(packageElement);
+        // Create root element <package>
+        Element packageElement = doc.createElement("package");
+        packageElement.setAttribute("version", "3.0");
+        packageElement.setAttribute("xmlns", "http://www.idpf.org/2007/opf");
+        doc.appendChild(packageElement);
 
-    // Create <metadata> element
-    Element metadata = doc.createElement("metadata");
-    packageElement.appendChild(metadata);
+        // Create <metadata> element
+        Element metadata = doc.createElement("metadata");
+        packageElement.appendChild(metadata);
 
-    Element title = doc.createElement("title");
-    title.setTextContent("Converted CBZ");
-    metadata.appendChild(title);
+        Element title = doc.createElement("title");
+        title.setTextContent("Converted CBZ");
+        metadata.appendChild(title);
 
-    Element creator = doc.createElement("creator");
-    creator.setTextContent("Your Name");
-    metadata.appendChild(creator);
+        Element creator = doc.createElement("creator");
+        creator.setTextContent("Your Name");
+        metadata.appendChild(creator);
 
-    // Create <manifest> element
-    Element manifest = doc.createElement("manifest");
-    packageElement.appendChild(manifest);
+        // Create <manifest> element
+        Element manifest = doc.createElement("manifest");
+        packageElement.appendChild(manifest);
 
-    // Create <spine> element
-    Element spine = doc.createElement("spine");
-    packageElement.appendChild(spine);
+        // Create <spine> element
+        Element spine = doc.createElement("spine");
+        packageElement.appendChild(spine);
 
-    // Add images and pages to manifest and spine
-    File[] images = tempDir.listFiles();
-    if (images != null) {
-        for (File image : images) {
-            if (image.isFile()) {
-                String fileName = image.getName();
-                
-                // Add to manifest
-                Element item = doc.createElement("item");
-                item.setAttribute("id", fileName.replaceFirst("[.][^.]+$", ""));
-                item.setAttribute("href", "pages/" + fileName.replaceFirst("[.][^.]+$", "") + ".xhtml");
-                item.setAttribute("media-type", "application/xhtml+xml");
-                manifest.appendChild(item);
+        File[] images = tempDir.listFiles();
+        if (images != null) {
+            for (File image : images) {
+                if (image.isFile()) {
+                    String imageName = image.getName();
+                    String imageId = imageName.replaceFirst("[.][^.]+$", "");
 
-                // Add to spine
-                Element reference = doc.createElement("itemref");
-                reference.setAttribute("idref", fileName.replaceFirst("[.][^.]+$", ""));
-                spine.appendChild(reference);
+                    Element item = doc.createElement("item");
+                    item.setAttribute("id", imageId);
+                    item.setAttribute("href", "pages/" + imageId + ".xhtml");
+                    item.setAttribute("media-type", "application/xhtml+xml");
+                    manifest.appendChild(item);
+
+                    Element itemref = doc.createElement("itemref");
+                    itemref.setAttribute("idref", imageId);
+                    spine.appendChild(itemref);
+                }
             }
         }
+
+        TransformerFactory transformerFactory = TransformerFactory.newInstance();
+        Transformer transformer = transformerFactory.newTransformer();
+        DOMSource source = new DOMSource(doc);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        transformer.transform(source, new StreamResult(baos));
+
+        epubZip.putNextEntry(new ZipEntry("OPS/content.opf"));
+        epubZip.write(baos.toByteArray());
+        epubZip.closeEntry();
     }
 
-    // Transform the document to a string and write to the zip
-    TransformerFactory transformerFactory = TransformerFactory.newInstance();
-    Transformer transformer = transformerFactory.newTransformer();
-    DOMSource source = new DOMSource(doc);
-    StringWriter writer = new StringWriter();
-    StreamResult result = new StreamResult(writer);
-    transformer.transform(source, result);
-
-    epubZip.putNextEntry(new ZipEntry("OPS/content.opf"));
-    epubZip.write(writer.toString().getBytes());
-    epubZip.closeEntry();
-}
-
-
-    private static void deleteDirectory(File directory) {
-        if (directory.isDirectory()) {
-            for (File file : directory.listFiles()) {
+    private static void deleteDirectory(File dir) {
+        if (dir.isDirectory()) {
+            for (File file : dir.listFiles()) {
                 deleteDirectory(file);
             }
         }
-        directory.delete();
+        dir.delete();
     }
 
     public static void main(String[] args) {
